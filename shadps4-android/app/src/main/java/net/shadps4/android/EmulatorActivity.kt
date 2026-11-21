@@ -11,10 +11,10 @@ import android.widget.Toast
 import androidx.compose.ui.platform.ComposeView
 import net.shadps4.android.input.OnScreenControllerOverlay
 import net.shadps4.android.input.TouchPadState
-import net.shadps4.android.ui.startEmulation
-import net.shadps4.android.ui.stopEmulation
-import net.shadps4.android.ui.updateControllerPad
-import net.shadps4.android.ui.updateEmulationSurface
+import uniffi.shadps4.startEmulation
+import uniffi.shadps4.stopEmulation
+import uniffi.shadps4.updateControllerPad
+import uniffi.shadps4.updateEmulationSurface
 
 class EmulatorActivity : Activity(), SurfaceHolder.Callback {
 

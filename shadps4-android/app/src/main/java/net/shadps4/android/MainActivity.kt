@@ -12,6 +12,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
 import net.shadps4.android.ui.*
+import uniffi.shadps4.initAndroidLogging
+import uniffi.shadps4.scanGameDirectory
 
 class MainActivity : ComponentActivity() {
 
