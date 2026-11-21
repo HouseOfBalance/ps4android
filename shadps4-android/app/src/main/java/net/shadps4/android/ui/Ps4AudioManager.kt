@@ -2,12 +2,8 @@ package net.shadps4.android.ui
 
 import android.content.Context
 import android.media.MediaPlayer
-import kotlinx.coroutines.delay
 
-/**
- * Plays authentic PS4 UI sound effects (navigate, startup, shutdown, trophy reward)
- * copied directly from d4v1-sudo/Ps4-UI assets/ps4ui/*.mp3.
- */
+// Plays authentic PS4 UI sound effects (navigate, startup, shutdown, trophy reward)
 object Ps4AudioManager {
 
     fun playSound(context: Context, assetFileName: String) {
