@@ -1,0 +1,7 @@
+[submodule "shadPS4"]
+	path = shadPS4
+	url = https://github.com/HouseOfBalance/shadPS4.git
+	branch = android-port
+[submodule "shadPS4-launcher"]
+	path = shadPS4-launcher
+	url = https://github.com/HouseOfBalance/shadPS4-launcher.git

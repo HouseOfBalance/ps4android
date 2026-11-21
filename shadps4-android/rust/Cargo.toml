@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/library",
+    "crates/driver-mgr",
+    "crates/emu-host",
+]
+resolver = "2"

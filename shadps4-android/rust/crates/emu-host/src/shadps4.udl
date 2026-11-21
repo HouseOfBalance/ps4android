@@ -1,0 +1,28 @@
+namespace shadps4 {
+    GameItem? scan_game_folder(string folder_path);
+    sequence<GameItem> scan_game_directory(string root_directory);
+    sequence<DriverItem> get_installed_drivers(string storage_dir);
+    boolean install_driver(string storage_dir, string zip_path);
+    void init_android_logging();
+    i32 start_emulation(string game_path, string title_id, string? custom_driver_path, boolean enable_tso);
+    i32 stop_emulation();
+    void update_controller_pad(i32 buttons, f32 lx, f32 ly, f32 rx, f32 ry, f32 l2, f32 r2);
+    void update_emulation_surface(i64 surface_handle, i32 width, i32 height);
+};
+
+dictionary GameItem {
+    string title_id;
+    string title;
+    string app_version;
+    string category;
+    string? icon_path;
+    string folder_path;
+};
+
+dictionary DriverItem {
+    string name;
+    string description;
+    string author;
+    string driver_version;
+    string library_name;
+};
