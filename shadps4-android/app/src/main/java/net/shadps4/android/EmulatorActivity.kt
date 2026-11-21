@@ -1,6 +1,5 @@
 package net.shadps4.android
 
-import android.app.Activity
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -8,6 +7,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.compose.ui.platform.ComposeView
 import net.shadps4.android.input.OnScreenControllerOverlay
 import net.shadps4.android.input.TouchPadState
@@ -16,7 +16,7 @@ import uniffi.shadps4.stopEmulation
 import uniffi.shadps4.updateControllerPad
 import uniffi.shadps4.updateEmulationSurface
 
-class EmulatorActivity : Activity(), SurfaceHolder.Callback {
+class EmulatorActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     private lateinit var surfaceView: SurfaceView
     private var gamePath: String = ""
