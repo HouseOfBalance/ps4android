@@ -111,6 +111,7 @@ fun VirtualJoystick(onStickMove: (Float, Float) -> Unit) {
     var thumbOffset by remember { mutableStateOf(Offset.Zero) }
     val maxRadius = 60f
 
+    // Optimized Single-Pass Canvas rendering for Budget & Midrange SoCs (e.g. Snapdragon 685)
     Canvas(
         modifier = Modifier
             .fillMaxSize()
@@ -123,11 +124,12 @@ fun VirtualJoystick(onStickMove: (Float, Float) -> Unit) {
                     onDrag = { change, dragAmount ->
                         change.consume()
                         val raw = thumbOffset + dragAmount
-                        val dist = sqrt(raw.x * raw.x + raw.y * raw.y)
-                        thumbOffset = if (dist > maxRadius) {
-                            Offset(raw.x / dist * maxRadius, raw.y / dist * maxRadius)
+                        val distSq = raw.x * raw.x + raw.y * raw.y
+                        if (distSq > maxRadius * maxRadius) {
+                            val dist = sqrt(distSq)
+                            thumbOffset = Offset(raw.x / dist * maxRadius, raw.y / dist * maxRadius)
                         } else {
-                            raw
+                            thumbOffset = raw
                         }
                         onStickMove(thumbOffset.x / maxRadius, thumbOffset.y / maxRadius)
                     }
@@ -136,14 +138,14 @@ fun VirtualJoystick(onStickMove: (Float, Float) -> Unit) {
     ) {
         val center = Offset(size.width / 2, size.height / 2)
         drawCircle(
-            color = Color.White.copy(alpha = 0.2f),
-            radius = maxRadius + 15f,
+            color = Color.White.copy(alpha = 0.15f),
+            radius = maxRadius + 12f,
             center = center,
-            style = Stroke(width = 4f)
+            style = Stroke(width = 3f)
         )
         drawCircle(
-            color = Color.White.copy(alpha = 0.45f),
-            radius = 32f,
+            color = Color.White.copy(alpha = 0.35f),
+            radius = 28f,
             center = center + thumbOffset
         )
     }

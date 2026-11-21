@@ -82,15 +82,18 @@ fun GameLibraryScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 140.dp),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                columns = GridCells.Adaptive(minSize = 130.dp),
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(games) { game ->
+                items(
+                    items = games,
+                    key = { it.titleId } // Keyed LazyGrid: avoids recompilation and frame drops during fast scrolling
+                ) { game ->
                     GameCard(game = game, onClick = { onGameClick(game) })
                 }
             }
@@ -130,16 +133,16 @@ fun GameCard(game: GameUiModel, onClick: () -> Unit) {
                     }
                 }
             }
-            Column(modifier = Modifier.padding(8.dp)) {
+            Column(modifier = Modifier.padding(6.dp)) {
                 Text(
                     text = game.title,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${game.titleId} • v${game.appVersion}",
+                    text = game.titleId,
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray
                 )
