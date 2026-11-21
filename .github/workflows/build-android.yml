@@ -39,15 +39,14 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Install cargo-ndk & uniffi-bindgen
+      - name: Install cargo-ndk
         run: |
           cargo install cargo-ndk --locked
-          cargo install uniffi-bindgen --version 0.28.0 --locked
 
       - name: Generate UniFFI Kotlin Bindings
         working-directory: shadps4-android/rust/crates/emu-host
         run: |
-          uniffi-bindgen generate src/shadps4.udl --language kotlin --out-dir ../../../app/src/main/java/net/shadps4/android/ui
+          cargo run --bin uniffi-bindgen generate src/shadps4.udl --language kotlin --out-dir ../../../app/src/main/java/net/shadps4/android/ui
 
       - name: Build Rust Backend Shared Library (arm64-v8a)
         working-directory: shadps4-android/rust
