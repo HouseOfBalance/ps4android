@@ -5,3 +5,9 @@
 [submodule "shadPS4-launcher"]
 	path = shadPS4-launcher
 	url = https://github.com/HouseOfBalance/shadPS4-launcher.git
+[submodule "shadps4-android/native/third_party/FEX"]
+	path = shadps4-android/native/third_party/FEX
+	url = https://github.com/FEX-Emu/FEX.git
+[submodule "shadps4-android/native/third_party/libadrenotools"]
+	path = shadps4-android/native/third_party/libadrenotools
+	url = https://github.com/bylaws/libadrenotools.git
