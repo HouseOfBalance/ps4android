@@ -1,6 +1,7 @@
 package net.shadps4.android.ui
 
-import androidx.compose.animation.animateColorAsState
+import android.graphics.Typeface
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -16,30 +17,34 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import uniffi.shadps4.GameItem
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.sin
 
-// Authentic PlayStation 4 Orbis OS Colors
-val Ps4DeepNavy = Color(0xFF030B1E)
-val Ps4ElectricBlue = Color(0xFF00439C)
+// Exact Colors from d4v1-sudo/Ps4-UI main.css
+val Ps4UiBackgroundBlue = Color(0xFF0E6CC4)
+val Ps4UiWaveCyan = Color(0xFF00AAFF)
+val Ps4UiNotificationDark = Color(0xFF222222)
+val Ps4UiNotificationBlue = Color(0xFF0091FF)
 val Ps4CyanGlow = Color(0xFF00A2FF)
-val Ps4GoldTrophy = Color(0xFFE5B842)
-val Ps4PlusYellow = Color(0xFFFFD800)
-val Ps4GlassWhite = Color(0x24FFFFFF)
 
 data class GameUiModel(
     val titleId: String,
@@ -47,7 +52,12 @@ data class GameUiModel(
     val appVersion: String,
     val iconPath: String?,
     val folderPath: String,
-    val category: String = "Game Disc"
+    val category: String = "PS4™ Game",
+    val actionLabel: String = "Start",
+    val isPlayStationStore: Boolean = false,
+    val isSettingsTile: Boolean = false,
+    val isScanFolderTile: Boolean = false,
+    val isShutdownTile: Boolean = false
 )
 
 fun GameItem.toUiModel(): GameUiModel = GameUiModel(
@@ -56,617 +66,734 @@ fun GameItem.toUiModel(): GameUiModel = GameUiModel(
     appVersion = this.appVersion,
     iconPath = this.iconPath,
     folderPath = this.folderPath,
-    category = if (this.category == "gd") "PS4™ Game" else "System App"
+    category = if (this.category == "gd") "PS4™ Game" else "System App",
+    actionLabel = "Start"
 )
+
+@Composable
+fun rememberPs4SstFontFamily(): FontFamily {
+    val context = LocalContext.current
+    return remember {
+        try {
+            val tf = Typeface.createFromAsset(context.assets, "ps4ui/font/sst.ttf")
+            FontFamily(tf)
+        } catch (_: Throwable) {
+            FontFamily.SansSerif
+        }
+    }
+}
 
 @Composable
 fun GameLibraryScreen(
     games: List<GameUiModel>,
     activeDriverName: String = "Default Adreno / System Vulkan",
+    isUnlockedInitial: Boolean = false,
+    onUnlockScreen: () -> Unit = {},
     onGameClick: (GameUiModel) -> Unit,
     onPickDirectoryClick: () -> Unit,
-    onDriverSettingsClick: () -> Unit
+    onDriverSettingsClick: () -> Unit,
+    onShutdownClick: () -> Unit = {}
 ) {
-    // Include built-in PS4 system tiles alongside scanned games
-    val allEntries = remember(games) {
-        val list = mutableListOf<Ps4XmbTile>()
-        games.forEach { g ->
-            list.add(Ps4XmbTile.Game(g))
+    val context = LocalContext.current
+    val sstFont = rememberPs4SstFontFamily()
+
+    var isUnlocked by remember { mutableStateOf(isUnlockedInitial) }
+    var showTrophyNotification by remember { mutableStateOf(false) }
+
+    // Cycling news ticker from d4v1-sudo/Ps4-UI script.js timeout()
+    val infoMessages = remember(activeDriverName) {
+        listOf(
+            "God of War Ragnarok now available!",
+            "The Last of Us Part II new update",
+            "Ghosts'n Goblins demo available now",
+            "GPU Driver: $activeDriverName"
+        )
+    }
+    var infoIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(4000)
+            infoIndex = (infoIndex + 1) % infoMessages.size
         }
-        // Always include classic PS4 System Library / Add Games tile & GPU Driver Toolbox tile
-        list.add(Ps4XmbTile.AddGameFolder)
-        list.add(Ps4XmbTile.GpuDriverToolbox)
+    }
+
+    // Auto-hide Trophy Toast after 4 seconds like script.js showNotification()
+    LaunchedEffect(showTrophyNotification) {
+        if (showTrophyNotification) {
+            delay(4000)
+            showTrophyNotification = false
+        }
+    }
+
+    // 1. LOCK SCREEN: exact reproduction of <img id="imagem" src="./assets/img/start.png"> + "Press PS button or space"
+    if (!isUnlocked) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Ps4UiBackgroundBlue)
+                .clickable {
+                    Ps4AudioManager.playStartup(context)
+                    isUnlocked = true
+                    onUnlockScreen()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = "file:///android_asset/ps4ui/img/start.png",
+                contentDescription = "Start Screen",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Pulsing prompt at top: 70% from main.css #mensagem
+            val infiniteTransition = rememberInfiniteTransition(label = "ps_prompt")
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.45f,
+                targetValue = 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1100, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "prompt_alpha"
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 64.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Text(
+                    text = "Press PS button or tap screen to start",
+                    color = Color.White.copy(alpha = alpha),
+                    fontFamily = sstFont,
+                    fontSize = 18.sp
+                )
+            }
+        }
+        return
+    }
+
+    // Build full list of tiles matching d4v1-sudo/Ps4-UI index.html #games
+    val allTiles = remember(games) {
+        val list = mutableListOf<GameUiModel>()
+        // 1. PlayStation Store tile (with 2x4 sub-grid)
+        list.add(
+            GameUiModel(
+                titleId = "STORE",
+                title = "Playstation Store",
+                appVersion = "1.0",
+                iconPath = "file:///android_asset/ps4ui/img/ps.png",
+                folderPath = "",
+                actionLabel = "Start",
+                isPlayStationStore = true
+            )
+        )
+        // 2. What's New tile (opens Scan Folder so user can add real PS4 dumps easily)
+        list.add(
+            GameUiModel(
+                titleId = "WHATS_NEW",
+                title = "What's New (Add PS4 Folder)",
+                appVersion = "1.0",
+                iconPath = "file:///android_asset/ps4ui/img/new.png",
+                folderPath = "",
+                actionLabel = "Scan",
+                isScanFolderTile = true
+            )
+        )
+        // 3. All user/showcase games
+        list.addAll(games)
+        // 4. Settings tile (opens GPU Turnip Driver Manager)
+        list.add(
+            GameUiModel(
+                titleId = "SETTINGS",
+                title = "Settings (Turnip GPU Drivers)",
+                appVersion = "1.0",
+                iconPath = "file:///android_asset/ps4ui/img/settings.png",
+                folderPath = "",
+                actionLabel = "Open",
+                isSettingsTile = true
+            )
+        )
+        // 5. Turn Off tile (#shutdown)
+        list.add(
+            GameUiModel(
+                titleId = "TURN_OFF",
+                title = "Turn Off",
+                appVersion = "1.0",
+                iconPath = "file:///android_asset/ps4ui/img/off.png",
+                folderPath = "",
+                actionLabel = "Shutdown",
+                isShutdownTile = true
+            )
+        )
         list
     }
 
-    var selectedIndex by remember(allEntries.size) { mutableIntStateOf(0) }
-    val currentTile = allEntries.getOrNull(selectedIndex) ?: Ps4XmbTile.AddGameFolder
+    // Default focus on first game or What's New
+    var selectedIndex by remember(allTiles.size) {
+        mutableIntStateOf(if (allTiles.size > 2) 2 else 0)
+    }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 1. Dynamic PS4 Orbis Flow Wave Background (Optimized for 120Hz on Snapdragon 685)
-        Ps4DynamicWaveBackground()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Ps4UiBackgroundBlue)
+    ) {
+        // 2. DRIFTING ROTATING WAVES (.box > .wave -one, -two, -three from main.css)
+        Ps4UiDriftingWavesBackground()
 
-        // 2. Backdrop Artwork Overlay if selected item is a game with icon
-        if (currentTile is Ps4XmbTile.Game && currentTile.game.iconPath != null) {
-            AsyncImage(
-                model = currentTile.game.iconPath,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(0.16f)
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Ps4DeepNavy.copy(alpha = 0.55f),
-                                Color.Transparent,
-                                Ps4DeepNavy.copy(alpha = 0.90f)
-                            )
-                        )
-                    )
-            )
-        }
+        // 3. TOP HEADER BAR (<header> from index.html: #plus, #info, #textInfo, #friends, #user, #userName, #trophies, #clock)
+        Ps4UiHeaderBar(
+            sstFont = sstFont,
+            infoText = infoMessages[infoIndex],
+            trophyCount = games.size,
+            onPlusClick = {
+                Ps4AudioManager.playReward(context)
+                showTrophyNotification = true
+            },
+            onSettingsClick = {
+                Ps4AudioManager.playNavigate(context)
+                onDriverSettingsClick()
+            },
+            onScanClick = {
+                Ps4AudioManager.playNavigate(context)
+                onPickDirectoryClick()
+            }
+        )
 
-        // 3. Main PS4 Home Screen Layout
+        // 4. HORIZONTAL GAMES RIBBON (<div id="games"> with .squareGame tiles)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .padding(top = 74.dp),
+            verticalArrangement = Arrangement.Top
         ) {
-            // TOP BAR: PS4 Function Area (Notifications, Profile, Trophies, GPU Driver, Clock)
-            Ps4TopFunctionBar(
-                gameCount = games.size,
-                activeDriverName = activeDriverName,
-                onScanFolderClick = onPickDirectoryClick,
-                onDriverManagerClick = onDriverSettingsClick
-            )
-
-            // CENTER BAR: PS4 Content Area (Horizontal Carousel + Live Game Info Panel)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.Center
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 56.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    modifier = Modifier.height(175.dp)
-                ) {
-                    itemsIndexed(
-                        items = allEntries,
-                        key = { idx, item -> item.uniqueKey(idx) }
-                    ) { index, tile ->
-                        val isSelected = index == selectedIndex
-                        Ps4CarouselTileItem(
-                            tile = tile,
-                            isSelected = isSelected,
-                            onSelect = {
-                                if (selectedIndex == index) {
-                                    when (tile) {
-                                        is Ps4XmbTile.Game -> onGameClick(tile.game)
-                                        is Ps4XmbTile.AddGameFolder -> onPickDirectoryClick()
-                                        is Ps4XmbTile.GpuDriverToolbox -> onDriverSettingsClick()
+                itemsIndexed(
+                    items = allTiles,
+                    key = { idx, item -> "${item.titleId}_$idx" }
+                ) { index, item ->
+                    val isFocused = index == selectedIndex
+                    Ps4UiSquareGameTile(
+                        item = item,
+                        isFocused = isFocused,
+                        sstFont = sstFont,
+                        onClick = {
+                            if (selectedIndex != index) {
+                                Ps4AudioManager.playNavigate(context)
+                                selectedIndex = index
+                            } else {
+                                when {
+                                    item.isPlayStationStore -> {
+                                        Ps4AudioManager.playReward(context)
+                                        showTrophyNotification = true
                                     }
-                                } else {
-                                    selectedIndex = index
+                                    item.isScanFolderTile -> {
+                                        Ps4AudioManager.playNavigate(context)
+                                        onPickDirectoryClick()
+                                    }
+                                    item.isSettingsTile -> {
+                                        Ps4AudioManager.playNavigate(context)
+                                        onDriverSettingsClick()
+                                    }
+                                    item.isShutdownTile -> {
+                                        Ps4AudioManager.playShutdown(context)
+                                        isUnlocked = false
+                                        onShutdownClick()
+                                    }
+                                    else -> {
+                                        Ps4AudioManager.playNavigate(context)
+                                        onGameClick(item)
+                                    }
                                 }
                             }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // Selected Item Detail Sub-Panel (Authentic PS4 Start Bar + Title + Metadata)
-                Ps4SelectedItemDetailPanel(
-                    tile = currentTile,
-                    activeDriverName = activeDriverName,
-                    onPrimaryAction = {
-                        when (currentTile) {
-                            is Ps4XmbTile.Game -> onGameClick(currentTile.game)
-                            is Ps4XmbTile.AddGameFolder -> onPickDirectoryClick()
-                            is Ps4XmbTile.GpuDriverToolbox -> onDriverSettingsClick()
                         }
+                    )
+                }
+            }
+
+            // 5. PLAYSTATION STORE SUB-GRID (<div id="store"> shown when PlayStation Store tile is focused)
+            val focusedTile = allTiles.getOrNull(selectedIndex)
+            if (focusedTile?.isPlayStationStore == true) {
+                Ps4UiStoreSubGrid(
+                    onStoreItemClick = { title ->
+                        Ps4AudioManager.playNavigate(context)
+                        onPickDirectoryClick()
                     }
                 )
             }
+        }
 
-            // BOTTOM BAR: Authentic PS4 DualShock 4 Button Prompts
-            Ps4BottomButtonLegend(
-                onStartClick = {
-                    when (currentTile) {
-                        is Ps4XmbTile.Game -> onGameClick(currentTile.game)
-                        is Ps4XmbTile.AddGameFolder -> onPickDirectoryClick()
-                        is Ps4XmbTile.GpuDriverToolbox -> onDriverSettingsClick()
-                    }
-                },
-                onOptionsClick = onDriverSettingsClick,
-                onScanClick = onPickDirectoryClick
-            )
+        // 6. TROPHY ACHIEVEMENT NOTIFICATION POPUP (.notification-container from script.js)
+        AnimatedVisibility(
+            visible = showTrophyNotification,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 20.dp, end = 20.dp)
+        ) {
+            Ps4UiTrophyNotificationToast(sstFont = sstFont)
         }
     }
 }
 
-sealed class Ps4XmbTile {
-    data class Game(val game: GameUiModel) : Ps4XmbTile()
-    data object AddGameFolder : Ps4XmbTile()
-    data object GpuDriverToolbox : Ps4XmbTile()
-
-    fun uniqueKey(idx: Int): String = when (this) {
-        is Game -> "game_${game.titleId}_$idx"
-        is AddGameFolder -> "sys_add_folder"
-        is GpuDriverToolbox -> "sys_gpu_driver"
-    }
-}
-
+/**
+ * Exact reproduction of .box { transform: rotate(80deg); }
+ * and .wave -one (#0af), .wave -two (black), .wave -three (#0e6cc4) from main.css lines 435-487.
+ */
 @Composable
-fun Ps4DynamicWaveBackground() {
-    val infiniteTransition = rememberInfiniteTransition(label = "ps4_wave")
-    val phase by infiniteTransition.animateFloat(
+fun Ps4UiDriftingWavesBackground() {
+    val infiniteTransition = rememberInfiniteTransition(label = "ps4_drift_waves")
+
+    val rot1 by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 6.283185f,
+        targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 14000, easing = LinearEasing),
+            animation = tween(7000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "wave_phase"
+        label = "wave_one"
+    )
+    val rot2 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(5500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "wave_two"
+    )
+    val rot3 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(7500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "wave_three"
     )
 
-    val bgBrush = remember {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF020B26),
-                Color(0xFF002D72),
-                Color(0xFF00439C),
-                Color(0xFF03102E)
-            )
-        )
-    }
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(bgBrush)
-    ) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
 
-        // Ambient radial light glow in center-right like PS4 Orbis OS
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Ps4CyanGlow.copy(alpha = 0.22f), Color.Transparent),
-                center = Offset(w * 0.7f, h * 0.35f),
-                radius = w * 0.55f
-            ),
-            center = Offset(w * 0.7f, h * 0.35f),
-            radius = w * 0.55f
-        )
+        // Draw 3 large rounded drifting wave blobs positioned on the left/bottom as in d4v1-sudo/Ps4-UI
+        val waveSize = Size(w * 1.15f, h * 1.95f)
+        val radius = CornerRadius(waveSize.width * 0.43f, waveSize.height * 0.43f)
+        val centerPivot = Offset(w * 0.18f, h * 0.65f)
 
-        // Draw 2 lightweight Silk Ribbon Waves (Fast math for Snapdragon 685 120Hz)
-        for (waveIdx in 0..1) {
-            val path = Path()
-            val yBase = h * (0.52f + waveIdx * 0.14f)
-            val amp = h * (0.07f - waveIdx * 0.02f)
-            val freq = if (waveIdx == 0) 1.5f else 2.1f
-            val offsetPhase = phase + waveIdx * 1.4f
+        // Wave One (#00AAFF, opacity 0.4)
+        withTransform({
+            rotate(degrees = rot1 + 80f, pivot = centerPivot)
+        }) {
+            drawRoundRect(
+                color = Ps4UiWaveCyan.copy(alpha = 0.35f),
+                topLeft = Offset(centerPivot.x - waveSize.width * 0.5f, centerPivot.y - waveSize.height * 0.48f),
+                size = waveSize,
+                cornerRadius = radius
+            )
+        }
 
-            path.moveTo(0f, yBase)
-            val steps = 20
-            val stepX = w / steps
-            for (i in 1..steps) {
-                val x = i * stepX
-                val angle = (x / w) * freq * 3.14159f + offsetPhase
-                val y = yBase + sin(angle) * amp
-                path.lineTo(x, y)
-            }
+        // Wave Two (Black, opacity 0.28)
+        withTransform({
+            rotate(degrees = rot2 + 80f, pivot = centerPivot)
+        }) {
+            drawRoundRect(
+                color = Color.Black.copy(alpha = 0.25f),
+                topLeft = Offset(centerPivot.x - waveSize.width * 0.52f, centerPivot.y - waveSize.height * 0.46f),
+                size = waveSize,
+                cornerRadius = radius
+            )
+        }
 
-            drawPath(
-                path = path,
-                color = Color.White.copy(alpha = if (waveIdx == 0) 0.14f else 0.08f),
-                style = Stroke(width = if (waveIdx == 0) 3.dp.toPx() else 1.5.dp.toPx())
+        // Wave Three (#0E6CC4, opacity 0.4)
+        withTransform({
+            rotate(degrees = rot3 + 80f, pivot = centerPivot)
+        }) {
+            drawRoundRect(
+                color = Ps4UiBackgroundBlue.copy(alpha = 0.4f),
+                topLeft = Offset(centerPivot.x - waveSize.width * 0.48f, centerPivot.y - waveSize.height * 0.5f),
+                size = waveSize,
+                cornerRadius = radius
             )
         }
     }
 }
 
+/**
+ * Exact Header from d4v1-sudo/Ps4-UI index.html lines 24-35:
+ * #plus | #info + #textInfo | #friends (+5) | #user + #userName (Player) | #trophies (+6) | #clock
+ */
 @Composable
-fun Ps4TopFunctionBar(
-    gameCount: Int,
-    activeDriverName: String,
-    onScanFolderClick: () -> Unit,
-    onDriverManagerClick: () -> Unit
+fun Ps4UiHeaderBar(
+    sstFont: FontFamily,
+    infoText: String,
+    trophyCount: Int,
+    onPlusClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onScanClick: () -> Unit
 ) {
-    val currentTime = remember {
-        SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
+    var clockText by remember {
+        mutableStateOf(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()))
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            clockText = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        }
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .padding(horizontal = 24.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Left: PlayStation Plus Badge + User Profile + Status Icons
+        // Left Group: PS Plus Icon + Info Icon + Animated News Ticker
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.weight(1.1f)
         ) {
-            // PS Logo Pill
-            Box(
+            // #plus
+            AsyncImage(
+                model = "file:///android_asset/ps4ui/img/plus.png",
+                contentDescription = "PS Plus",
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Ps4CyanGlow.copy(alpha = 0.2f))
-                    .border(1.dp, Ps4CyanGlow.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = "PS4",
-                    color = Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 13.sp,
-                    letterSpacing = 1.sp
-                )
-            }
-
-            // User Avatar & Online Dot
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Ps4ElectricBlue)
-                        .border(1.5.dp, Color.White, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("P1", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF00E676))
-                )
-                Text(
-                    text = "HouseOfBalance",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            // PS Plus Golden Cross Icon
-            Text(
-                text = "✚",
-                color = Ps4PlusYellow,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.ExtraBold
+                    .size(34.dp)
+                    .clickable(onClick = onPlusClick)
             )
 
-            // Trophy Level Pill
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("🏆", fontSize = 13.sp)
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // #info
+            AsyncImage(
+                model = "file:///android_asset/ps4ui/img/info.png",
+                contentDescription = "Info",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(32.dp)
+                    .clickable(onClick = onScanClick)
+            )
+
+            // #textInfo
+            Crossfade(targetState = infoText, label = "text_info") { msg ->
                 Text(
-                    text = "$gameCount Titles",
-                    color = Ps4GoldTrophy,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
+                    text = msg,
+                    color = Color.White,
+                    fontFamily = sstFont,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        // Right: Quick Function Icons (Scan Folder, Turnip Driver, Clock)
+        // Right Group: #user + #userName | #trophies | #friends | #clock
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Driver indicator chip
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.White.copy(alpha = 0.12f))
-                    .clickable(onClick = onDriverManagerClick)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            // #user + #userName
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.clickable(onClick = onSettingsClick)
             ) {
-                Text(
-                    text = "⚙ GPU: $activeDriverName",
-                    color = Color(0xFFB3E5FC),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                AsyncImage(
+                    model = "file:///android_asset/ps4ui/img/user.png",
+                    contentDescription = "User",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(26.dp)
                 )
-            }
-
-            // Add Game Folder Button
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.White.copy(alpha = 0.12f))
-                    .clickable(onClick = onScanFolderClick)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
                 Text(
-                    text = "＋ Add Games",
+                    text = "Player",
                     color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    fontFamily = sstFont,
+                    fontSize = 18.sp
                 )
             }
 
-            // Clock
+            // #trophies
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.clickable(onClick = onPlusClick)
+            ) {
+                AsyncImage(
+                    model = "file:///android_asset/ps4ui/img/trophy.png",
+                    contentDescription = "Trophies",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    text = "+$trophyCount",
+                    color = Color.White,
+                    fontFamily = sstFont,
+                    fontSize = 16.sp
+                )
+            }
+
+            // #friends
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                AsyncImage(
+                    model = "file:///android_asset/ps4ui/img/friends.png",
+                    contentDescription = "Friends",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(30.dp)
+                )
+                Text(
+                    text = "+5",
+                    color = Color.White,
+                    fontFamily = sstFont,
+                    fontSize = 16.sp
+                )
+            }
+
+            // #clock
             Text(
-                text = currentTime,
-                color = Color.White.copy(alpha = 0.9f),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Light
+                text = clockText,
+                color = Color.White,
+                fontFamily = sstFont,
+                fontSize = 20.sp
             )
         }
     }
 }
 
+/**
+ * Exact reproduction of .squareGame from main.css lines 180-222:
+ * - Unfocused: 11em x 11em square, only .imgGame visible.
+ * - Focused: expands to 15em width x 16.5em height with 3px solid white border,
+ *   .imgGame takes 85% height, .gameText ("Start" / "Open" / "Shutdown") takes bottom 15% with rgba(255,255,255,.2),
+ *   and .gameTitle appears directly to the right of the bottom bar!
+ */
 @Composable
-fun Ps4CarouselTileItem(
-    tile: Ps4XmbTile,
-    isSelected: Boolean,
-    onSelect: () -> Unit
+fun Ps4UiSquareGameTile(
+    item: GameUiModel,
+    isFocused: Boolean,
+    sstFont: FontFamily,
+    onClick: () -> Unit
 ) {
-    val scale by animateFloatAsState(
-        targetValue = if (isSelected) 1.18f else 0.92f,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
-        label = "tile_scale"
+    val tileWidth by animateDpAsState(
+        targetValue = if (isFocused) 172.dp else 124.dp,
+        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        label = "tile_w"
+    )
+    val tileHeight by animateDpAsState(
+        targetValue = if (isFocused) 198.dp else 124.dp,
+        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        label = "tile_h"
     )
 
-    val borderColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.18f),
-        animationSpec = tween(180),
-        label = "tile_border"
+    val isSmallIconTile = item.isSettingsTile || item.isShutdownTile
+
+    Box(modifier = Modifier.wrapContentSize()) {
+        Column(
+            modifier = Modifier
+                .width(tileWidth)
+                .height(tileHeight)
+                .then(
+                    if (isFocused) Modifier.border(3.dp, Color.White)
+                    else Modifier
+                )
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick
+                )
+        ) {
+            // .imgGame (85% height when focused, 100% when unfocused)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(if (isFocused) 0.84f else 1f)
+                    .background(
+                        if (isSmallIconTile || item.isPlayStationStore || item.isScanFolderTile)
+                            Color(0xFF0A58A8).copy(alpha = 0.55f)
+                        else Color(0xFF072A57)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (item.iconPath != null) {
+                    AsyncImage(
+                        model = item.iconPath,
+                        contentDescription = item.title,
+                        contentScale = if (isSmallIconTile) ContentScale.Fit else ContentScale.Crop,
+                        modifier = if (isSmallIconTile) Modifier.fillMaxSize(0.45f) else Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text(
+                        text = item.titleId,
+                        color = Color.White,
+                        fontFamily = sstFont,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // .gameText ("Start" / "Open" / "Shutdown" bar at bottom of focused tile)
+            if (isFocused) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(0.16f)
+                        .background(Color.White.copy(alpha = 0.22f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = item.actionLabel,
+                        color = Color.White,
+                        fontFamily = sstFont,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // .gameTitle: positioned to the bottom-right side of the expanded tile (transform: translate(13.2em, -1.5em))
+        if (isFocused) {
+            Box(
+                modifier = Modifier
+                    .offset(x = tileWidth + 14.dp, y = tileHeight - 32.dp)
+                    .widthIn(min = 240.dp, max = 520.dp)
+            ) {
+                Text(
+                    text = item.title,
+                    color = Color.White,
+                    fontFamily = sstFont,
+                    fontSize = 21.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Visible
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Exact reproduction of <div id="store"> sub-grid from index.html lines 43-52
+ * showing God of War, Tomb Raider, Call of Duty Infinite Warfare, Mafia III, Destiny, Battlefield 1, Horizon, Persona 5.
+ */
+@Composable
+fun Ps4UiStoreSubGrid(
+    onStoreItemClick: (String) -> Unit
+) {
+    val storeItems = remember {
+        listOf(
+            "God of War" to "file:///android_asset/ps4ui/img/god.png",
+            "Rise of the Tomb Raider" to "file:///android_asset/ps4ui/img/tomb.png",
+            "Call of Duty: Infinite Warfare" to "file:///android_asset/ps4ui/img/if.png",
+            "Mafia III" to "file:///android_asset/ps4ui/img/mafia.png",
+            "Destiny: The Collection" to "file:///android_asset/ps4ui/img/destiny.png",
+            "Battlefield 1" to "file:///android_asset/ps4ui/img/b1.png",
+            "Horizon Zero Dawn" to "file:///android_asset/ps4ui/img/horizon.png",
+            "Persona 5" to "file:///android_asset/ps4ui/img/per.png"
+        )
+    }
+
+    LazyRow(
+        contentPadding = PaddingValues(start = 242.dp, end = 48.dp, top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        itemsIndexed(storeItems) { _, (title, imgUri) ->
+            Box(
+                modifier = Modifier
+                    .size(110.dp)
+                    .border(1.dp, Color.White.copy(alpha = 0.25f))
+                    .clickable { onStoreItemClick(title) }
+            ) {
+                AsyncImage(
+                    model = imgUri,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Exact reproduction of .notification-container from main.css lines 226-288 & script.js showNotification():
+ * Dark #222 box, rounded 8px, pulsing #0091FF circle with icon.png, "Hello World!" / "First Achievement."
+ */
+@Composable
+fun Ps4UiTrophyNotificationToast(sstFont: FontFamily) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse_trophy")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.16f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "icon_pulse"
     )
 
-    val interactionSource = remember { MutableInteractionSource() }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Row(
         modifier = Modifier
-            .scale(scale)
-            .padding(horizontal = if (isSelected) 10.dp else 2.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Ps4UiNotificationDark)
+            .padding(16.dp)
+            .widthIn(max = 360.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(124.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(
-                    when (tile) {
-                        is Ps4XmbTile.Game -> Color(0xFF0A1931)
-                        is Ps4XmbTile.AddGameFolder -> Color(0xFF003680)
-                        is Ps4XmbTile.GpuDriverToolbox -> Color(0xFF082046)
-                    }
-                )
-                .border(
-                    width = if (isSelected) 3.dp else 1.dp,
-                    color = borderColor,
-                    shape = RoundedCornerShape(4.dp)
-                )
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onSelect
-                ),
+                .size(48.dp)
+                .scale(pulseScale)
+                .clip(CircleShape)
+                .background(Ps4UiNotificationBlue),
             contentAlignment = Alignment.Center
         ) {
-            when (tile) {
-                is Ps4XmbTile.Game -> {
-                    if (tile.game.iconPath != null) {
-                        AsyncImage(
-                            model = tile.game.iconPath,
-                            contentDescription = tile.game.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        // Sleek PS4 Disc Placeholder
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "💿",
-                                fontSize = 34.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = tile.game.titleId,
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+            AsyncImage(
+                model = "file:///android_asset/ps4ui/img/icon.png",
+                contentDescription = "Trophy Icon",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(40.dp)
+            )
+        }
 
-                    // Bottom PS4 Cyan Selection Glow Bar
-                    if (isSelected) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .background(Ps4CyanGlow)
-                        )
-                    }
-                }
+        Spacer(modifier = Modifier.width(16.dp))
 
-                is Ps4XmbTile.AddGameFolder -> {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text("📁", fontSize = 36.sp)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Library",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Scan Folder",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-
-                is Ps4XmbTile.GpuDriverToolbox -> {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text("⚙️", fontSize = 36.sp)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Turnip GPU",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Drivers",
-                            color = Ps4CyanGlow,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
+        Column {
+            Text(
+                text = "Hello World!",
+                color = Color.White,
+                fontFamily = sstFont,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "First Achievement.",
+                color = Color(0xFFEEEEEE),
+                fontFamily = sstFont,
+                fontSize = 15.sp
+            )
         }
     }
 }
 
-@Composable
-fun Ps4SelectedItemDetailPanel(
-    tile: Ps4XmbTile,
-    activeDriverName: String,
-    onPrimaryAction: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
-            // Authentic PS4 "Start" Action Button below selected square
-            Button(
-                onClick = onPrimaryAction,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White.copy(alpha = 0.18f),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(3.dp),
-                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 8.dp),
-                modifier = Modifier.border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(3.dp))
-            ) {
-                Text(
-                    text = when (tile) {
-                        is Ps4XmbTile.Game -> "Start"
-                        is Ps4XmbTile.AddGameFolder -> "Select Directory"
-                        is Ps4XmbTile.GpuDriverToolbox -> "Configure"
-                    },
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
-                )
-            }
-
-            // Large PS4 Typography Title & Subtitle
-            Column {
-                Text(
-                    text = when (tile) {
-                        is Ps4XmbTile.Game -> tile.game.title
-                        is Ps4XmbTile.AddGameFolder -> "Add PS4 Game Directory (CUSA / PKG)"
-                        is Ps4XmbTile.GpuDriverToolbox -> "Adreno Turnip / Mesa Vulkan Driver Manager"
-                    },
-                    color = Color.White,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Light,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Text(
-                    text = when (tile) {
-                        is Ps4XmbTile.Game -> "${tile.game.category}  |  ${tile.game.titleId}  |  Version ${tile.game.appVersion}  |  FEXCore TSO Enabled"
-                        is Ps4XmbTile.AddGameFolder -> "Mount game dump folder containing sce_sys/param.sfo and eboot.bin"
-                        is Ps4XmbTile.GpuDriverToolbox -> "Active Driver: $activeDriverName • Custom KGSL Linker Namespace"
-                    },
-                    color = Color.White.copy(alpha = 0.72f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun Ps4BottomButtonLegend(
-    onStartClick: () -> Unit,
-    onOptionsClick: () -> Unit,
-    onScanClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Cross (X) - Enter / Start
-        Ps4ControllerPrompt(
-            symbol = "✕",
-            symbolColor = Color(0xFF64B5F6),
-            label = "Enter",
-            onClick = onStartClick
-        )
-        Spacer(modifier = Modifier.width(22.dp))
-
-        // Triangle - Scan Game Folder
-        Ps4ControllerPrompt(
-            symbol = "△",
-            symbolColor = Color(0xFF4DB6AC),
-            label = "Add Folder",
-            onClick = onScanClick
-        )
-        Spacer(modifier = Modifier.width(22.dp))
-
-        // OPTIONS - GPU Driver Manager
-        Ps4ControllerPrompt(
-            symbol = "OPTIONS",
-            symbolColor = Color.White,
-            label = "GPU Drivers",
-            isPill = true,
-            onClick = onOptionsClick
-        )
-    }
-}
-
+/**
+ * Shared PS4 Controller Prompt helper used in DriverManagerScreen.
+ */
 @Composable
 fun Ps4ControllerPrompt(
     symbol: String,
